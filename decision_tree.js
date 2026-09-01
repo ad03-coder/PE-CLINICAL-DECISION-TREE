@@ -60,7 +60,7 @@ const PE_DECISION_TREE = {
     icon: "📚",
     options: [
       { label: "AHA 2026", next: "symptoms_check", desc: "Wells / Geneva / Geneva Semplificato + PERC + YEARS" },
-      { label: "ESC 2019", next: "esc_hemodynamic_check", desc: "Valutazione instabilità emodinamica + Geneva Score (ESC) + D-Dimero" }
+      { label: "ESC 2019", next: "esc_hemodynamic_check", desc: "Valutazione instabilità emodinamica + Wells/Geneva Score (ESC) + D-Dimero" }
     ]
   },
 
@@ -373,7 +373,7 @@ const PE_DECISION_TREE = {
     ],
     interpretation: [
       { label: "Instabilità emodinamica", rules: [
-        { range: [0, 0], category: "Nessun criterio presente — emodinamicamente stabile", next: "esc_geneva_score" },
+        { range: [0, 0], category: "Nessun criterio presente — emodinamicamente stabile", next: "esc_choose_score" },
         { range: [1, 99], category: "Almeno un criterio presente — PE ad ALTO RISCHIO (instabile)", next: "esc_bedside_tte" }
       ]}
     ],
@@ -455,24 +455,21 @@ const PE_DECISION_TREE = {
         label: "CTPA (Angio-TC polmonare)",
         icon: "🖥️",
         desc: "In assenza di controindicazioni, eseguire CTPA per confermare la PE ad alto rischio.",
-        best_for: ["ci_none_esc"],
-        next: "esc_ctpa_result"
+        best_for: ["ci_none_esc"]
       },
       {
         id: "alt_scinti_esc",
         label: "Scintigrafia di Perfusione V/Q planare",
         icon: "☢️",
         desc: "Considerare se compatibile con i tempi di gestione dell'instabilità: indicata in gravidanza, allergia al mdc, insufficienza renale. In un paziente emodinamicamente instabile, raramente fattibile in urgenza.",
-        best_for: ["ci_rel1_esc", "ci_rel2_esc", "ci_abs3_esc"],
-        next: "esc_treat_high_risk_bedside"
+        best_for: ["ci_rel1_esc", "ci_rel2_esc", "ci_abs3_esc"]
       },
       {
         id: "alt_spect_esc",
         label: "Scintigrafia V/Q SPECT (± CT low-dose)",
         icon: "🔬",
         desc: "Maggiore accuratezza della planare, ma tempi di esecuzione generalmente incompatibili con l'instabilità emodinamica acuta.",
-        best_for: ["ci_rel1_esc", "ci_rel2_esc", "ci_abs3_esc"],
-        next: "esc_treat_high_risk_bedside"
+        best_for: ["ci_rel1_esc", "ci_rel2_esc", "ci_abs3_esc"]
       },
       {
         id: "alt_echo_esc",
@@ -480,7 +477,6 @@ const PE_DECISION_TREE = {
         icon: "🩻",
         desc: "Scelta appropriata quando la TC non è disponibile o il paziente non è trasferibile: i reperti ecocardiografici di disfunzione RV (già rilevati alla TTE bedside) sono sufficienti per confermare la PE ad alto rischio e procedere al trattamento, senza attendere la CTPA.",
         best_for: ["ci_abs1_esc", "ci_abs2_esc"],
-        next: "esc_treat_high_risk_bedside",
         subitems: [
           "Ecocardiografia — già eseguita: disfunzione RV confermata",
           "Ecografia polmonare — eventuale supporto per infarto polmonare/versamento pleurico",
@@ -490,59 +486,59 @@ const PE_DECISION_TREE = {
     ]
   },
 
-  esc_ctpa_result: {
-    id: "esc_ctpa_result",
+  // ────────────────────────────────────────────────────────────
+  // RAMO B — PAZIENTE STABILE: scelta dello score di probabilità clinica
+  // ESC 2019, Sez. 4.2: "the most frequently used prediction rules are
+  // the revised Geneva rule (Table 5) and the Wells rule" — entrambe
+  // esplicitamente validate ed equivalenti in performance diagnostica
+  // (confronto prospettico citato in Sez. 4.2).
+  // ────────────────────────────────────────────────────────────
+  esc_choose_score: {
+    id: "esc_choose_score",
     type: "question",
-    title: "Risultato della CTPA",
-    body: "Qual è l'esito dell'angio-TC polmonare?",
-    icon: "🔬",
+    title: "Quantifica la Probabilità Clinica",
+    subtitle: "ESC 2019, Sez. 4.2",
+    body: "Le linee guida ESC 2019 indicano il Revised Geneva Score e il Wells Score come le due regole predittive più utilizzate e con performance diagnostica comparabile. Seleziona quale utilizzare:",
+    icon: "📊",
     options: [
-      { label: "POSITIVA per PE", next: "esc_treat_high_risk", desc: "Conferma PE ad alto rischio" },
-      { label: "NEGATIVA per PE", next: "esc_search_other_causes_2", desc: "PE esclusa, cercare altre cause" }
+      { label: "Revised Geneva Score (ESC)", next: "esc_geneva_score", desc: "Tabella 5 ESC — non richiede giudizio soggettivo" },
+      { label: "Wells Score",                next: "esc_wells_score",  desc: "Regola predittiva alternativa, ugualmente validata (ESC Sez. 4.2)" }
     ]
   },
 
-  esc_treat_high_risk_bedside: {
-    id: "esc_treat_high_risk_bedside",
-    type: "result",
-    severity: "danger",
-    title: "Trattamento PE ad Alto Rischio",
-    subtitle: "Diagnosi bedside — CTPA non fattibile",
-    icon: "⚡",
-    cor: "Classe I/IIa",
-    cor_color: "#22c55e",
-    body: "Il paziente è troppo instabile per il trasferimento e la TC non è disponibile o fattibile.\n\nIn questi casi, i reperti ecocardiografici di disfunzione RV confermano la PE ad alto rischio e si raccomanda terapia di riperfusione emergente, anche senza confema con CTPA.",
-    note: "Reperti più specifici (segno 60/60, segno di McConnell, trombi in cavità destre) rafforzano ulteriormente l'indicazione alla riperfusione emergente.",
-    next: null
-  },
-
-  esc_treat_high_risk: {
-    id: "esc_treat_high_risk",
-    type: "result",
-    severity: "danger",
-    title: "Trattamento PE ad Alto Rischio",
-    subtitle: "PE confermata alla CTPA in paziente instabile",
-    icon: "⚡",
-    cor: "Classe I",
-    cor_color: "#22c55e",
-    body: "CTPA positiva in paziente emodinamicamente instabile con segni di disfunzione RV: diagnosi di PE ad alto rischio confermata.\n\nProcedere immediatamente con trattamento di riperfusione (trombolisi sistemica, embolectomia chirurgica o trattamento percutaneo con catetere, in base a risorse/competenze disponibili) e supporto emodinamico/respiratorio.",
-    next: null
-  },
-
-  esc_search_other_causes_2: {
-    id: "esc_search_other_causes_2",
-    type: "result",
-    severity: "safe",
-    title: "Ricerca Altre Cause di Shock o Instabilità",
-    subtitle: "CTPA negativa per PE",
-    icon: "🔍",
-    body: "La CTPA esclude la PE come causa dell'instabilità emodinamica.\n\nProcedere con la ricerca di altre cause di shock o instabilità (es. tamponamento, sindrome coronarica acuta, dissezione aortica, ipovolemia, sepsi).",
-    next: null
-  },
-
   // ────────────────────────────────────────────────────────────
-  // RAMO B — PAZIENTE STABILE: Geneva Score ESC (Tabella 5)
+  // RAMO B — PAZIENTE STABILE: Wells Score (alternativa ESC al Geneva)
   // ────────────────────────────────────────────────────────────
+  esc_wells_score: {
+    id: "esc_wells_score",
+    type: "score",
+    title: "Wells Score per PE",
+    subtitle: "Alternativa ESC 2019 al Revised Geneva Score",
+    icon: "📋",
+    description: "Stessa regola predittiva usata nel ramo AHA; le linee guida ESC 2019 la considerano equivalente al Geneva Score per la stima della probabilità clinica pre-test.",
+    items: [
+      { id: "ew1", label: "Sintomi clinici di TVP (gonfiore gamba, dolore alla palpazione)", points: 3   },
+      { id: "ew2", label: "PE più probabile di diagnosi alternativa",                        points: 3   },
+      { id: "ew3", label: "Frequenza cardiaca > 100 bpm",                                   points: 1.5 },
+      { id: "ew4", label: "Immobilizzazione ≥ 3 gg o chirurgia nelle ultime 4 settimane",   points: 1.5 },
+      { id: "ew5", label: "TVP o PE precedente",                                             points: 1.5 },
+      { id: "ew6", label: "Emottisi",                                                        points: 1   },
+      { id: "ew7", label: "Tumore maligno attivo",                                           points: 1   }
+    ],
+    interpretation: [
+      { label: "Standard Wells", rules: [
+        { range: [0,   1.9], category: "Bassa probabilità clinica (<15%)",        next: "esc_ddimer_test"   },
+        { range: [2,   6  ], category: "Probabilità clinica intermedia (15–50%)", next: "esc_ddimer_test"   },
+        { range: [6.1, 99 ], category: "Alta probabilità clinica (>50%)",         next: "esc_ctpa_no_dimer" }
+      ]},
+      { label: "Modified Wells (dicotomica)", rules: [
+        { range: [0,   4  ], category: "PE improbabile (≤4)",  next: "esc_ddimer_test"   },
+        { range: [4.1, 99 ], category: "PE probabile (>4)",    next: "esc_ctpa_no_dimer" }
+      ]}
+    ],
+    scoreType: "wells"
+  },
+
   esc_geneva_score: {
     id: "esc_geneva_score",
     type: "score",
@@ -634,24 +630,21 @@ const PE_DECISION_TREE = {
         label: "CTPA (Angio-TC polmonare)",
         icon: "🖥️",
         desc: "Prima scelta in assenza di controindicazioni: ampia disponibilità, eccellente performance diagnostica.",
-        best_for: ["ci_none_esc_li"],
-        next: "esc_ctpa_result_low_intermediate"
+        best_for: ["ci_none_esc_li"]
       },
       {
         id: "alt_scinti_esc_li",
         label: "Scintigrafia di Perfusione V/Q planare",
         icon: "☢️",
         desc: "Indicata in gravidanza (bassa dose fetale), allergia al mdc, insufficienza renale. Eseguita idealmente con la componente ventilatoria per accuratezza ottimale.",
-        best_for: ["ci_rel1_esc_li", "ci_rel2_esc_li", "ci_abs3_esc_li"],
-        next: "esc_vq_result_low_intermediate"
+        best_for: ["ci_rel1_esc_li", "ci_rel2_esc_li", "ci_abs3_esc_li"]
       },
       {
         id: "alt_spect_esc_li",
         label: "Scintigrafia V/Q SPECT (± CT low-dose)",
         icon: "🔬",
         desc: "Maggiore sensibilità e specificità rispetto alla planare, minore tasso di risultati indeterminati. Prima scelta quando disponibile.",
-        best_for: ["ci_rel1_esc_li", "ci_rel2_esc_li", "ci_abs3_esc_li"],
-        next: "esc_vq_result_low_intermediate"
+        best_for: ["ci_rel1_esc_li", "ci_rel2_esc_li", "ci_abs3_esc_li"]
       },
       {
         id: "alt_echo_esc_li",
@@ -659,7 +652,6 @@ const PE_DECISION_TREE = {
         icon: "🩻",
         desc: "Opzione in caso di indisponibilità della TC o paziente non trasferibile. Approccio integrato:",
         best_for: ["ci_abs1_esc_li", "ci_abs2_esc_li"],
-        next: "esc_echo_result_low_intermediate",
         subitems: [
           "Ecocardiografia — disfunzione RV",
           "Ecografia polmonare — infarto polmonare, versamento pleurico",
@@ -667,54 +659,6 @@ const PE_DECISION_TREE = {
         ]
       }
     ]
-  },
-
-  esc_ctpa_result_low_intermediate: {
-    id: "esc_ctpa_result_low_intermediate",
-    type: "question",
-    title: "Risultato CTPA",
-    subtitle: "Probabilità bassa/intermedia, D-Dimero positivo",
-    icon: "🔬",
-    options: [
-      { label: "PE confermata", next: "esc_treatment_indicated", desc: "CTPA diagnostica per PE a livello segmentale o più proximale" },
-      { label: "Nessuna PE", next: "esc_no_treatment", desc: "CTPA normale: PE esclusa senza ulteriori test" }
-    ]
-  },
-
-  esc_vq_result_low_intermediate: {
-    id: "esc_vq_result_low_intermediate",
-    type: "question",
-    title: "Risultato Scintigrafia V/Q",
-    subtitle: "Alternativa a CTPA per controindicazione relativa/allergia",
-    icon: "☢️",
-    options: [
-      { label: "Alta probabilità per PE", next: "esc_treatment_indicated", desc: "Scintigrafia V/Q ad alta probabilità — diagnostica per PE" },
-      { label: "Normale / bassa probabilità", next: "esc_no_treatment", desc: "Scan normale: PE esclusa senza ulteriori test" },
-      { label: "Non diagnostica / indeterminata", next: "esc_inconclusive_imaging", desc: "Risultato indeterminato: necessari ulteriori accertamenti" }
-    ]
-  },
-
-  esc_echo_result_low_intermediate: {
-    id: "esc_echo_result_low_intermediate",
-    type: "question",
-    title: "Risultato Ecografia Multiorgano",
-    subtitle: "Alternativa a CTPA per controindicazione assoluta",
-    icon: "🩻",
-    options: [
-      { label: "Segni compatibili con PE (disfunzione RV + TVP/altri segni)", next: "esc_treatment_indicated", desc: "Quadro ecografico suggestivo per PE" },
-      { label: "Nessun segno compatibile con PE", next: "esc_inconclusive_imaging", desc: "L'ecografia da sola non esclude la PE con sufficiente sicurezza" }
-    ]
-  },
-
-  esc_inconclusive_imaging: {
-    id: "esc_inconclusive_imaging",
-    type: "result",
-    severity: "warning",
-    title: "Imaging Non Diagnostico",
-    subtitle: "Necessari ulteriori accertamenti",
-    icon: "⚠️",
-    body: "Il test di imaging eseguito in alternativa alla CTPA non ha fornito un risultato conclusivo.\n\nConsiderare: ripetizione del test, esecuzione di CTPA non appena la controindicazione lo consenta, oppure ulteriori tecniche (es. V/Q SPECT se non già eseguita, CUS degli arti inferiori).",
-    next: null
   },
 
   // ────────────────────────────────────────────────────────────
@@ -752,24 +696,21 @@ const PE_DECISION_TREE = {
         label: "CTPA (Angio-TC polmonare)",
         icon: "🖥️",
         desc: "Prima scelta in assenza di controindicazioni: ampia disponibilità, eccellente performance diagnostica.",
-        best_for: ["ci_none_esc_nd"],
-        next: "esc_ctpa_result_no_dimer"
+        best_for: ["ci_none_esc_nd"]
       },
       {
         id: "alt_scinti_esc_nd",
         label: "Scintigrafia di Perfusione V/Q planare",
         icon: "☢️",
         desc: "Indicata in gravidanza (bassa dose fetale), allergia al mdc, insufficienza renale. Eseguita idealmente con la componente ventilatoria per accuratezza ottimale.",
-        best_for: ["ci_rel1_esc_nd", "ci_rel2_esc_nd", "ci_abs3_esc_nd"],
-        next: "esc_vq_result_no_dimer"
+        best_for: ["ci_rel1_esc_nd", "ci_rel2_esc_nd", "ci_abs3_esc_nd"]
       },
       {
         id: "alt_spect_esc_nd",
         label: "Scintigrafia V/Q SPECT (± CT low-dose)",
         icon: "🔬",
         desc: "Maggiore sensibilità e specificità rispetto alla planare, minore tasso di risultati indeterminati. Prima scelta quando disponibile.",
-        best_for: ["ci_rel1_esc_nd", "ci_rel2_esc_nd", "ci_abs3_esc_nd"],
-        next: "esc_vq_result_no_dimer"
+        best_for: ["ci_rel1_esc_nd", "ci_rel2_esc_nd", "ci_abs3_esc_nd"]
       },
       {
         id: "alt_echo_esc_nd",
@@ -777,7 +718,6 @@ const PE_DECISION_TREE = {
         icon: "🩻",
         desc: "Opzione in caso di indisponibilità della TC o paziente non trasferibile. Approccio integrato:",
         best_for: ["ci_abs1_esc_nd", "ci_abs2_esc_nd"],
-        next: "esc_echo_result_no_dimer",
         subitems: [
           "Ecocardiografia — disfunzione RV",
           "Ecografia polmonare — infarto polmonare, versamento pleurico",
@@ -785,55 +725,6 @@ const PE_DECISION_TREE = {
         ]
       }
     ]
-  },
-
-  esc_ctpa_result_no_dimer: {
-    id: "esc_ctpa_result_no_dimer",
-    type: "question",
-    title: "Risultato CTPA",
-    subtitle: "Alta probabilità clinica / PE-likely",
-    icon: "🔬",
-    options: [
-      { label: "PE confermata", next: "esc_treatment_indicated", desc: "CTPA diagnostica per PE a livello segmentale o più proximale" },
-      { label: "Nessuna PE", next: "esc_no_pe_high_probability", desc: "CTPA negativa, ma probabilità clinica era alta" }
-    ]
-  },
-
-  esc_vq_result_no_dimer: {
-    id: "esc_vq_result_no_dimer",
-    type: "question",
-    title: "Risultato Scintigrafia V/Q",
-    subtitle: "Alta probabilità clinica — alternativa a CTPA",
-    icon: "☢️",
-    options: [
-      { label: "Alta probabilità per PE", next: "esc_treatment_indicated", desc: "Scintigrafia V/Q ad alta probabilità — diagnostica per PE" },
-      { label: "Normale / bassa probabilità", next: "esc_no_pe_high_probability", desc: "Scan negativo, ma probabilità clinica era alta: valutare ulteriori accertamenti" },
-      { label: "Non diagnostica / indeterminata", next: "esc_inconclusive_imaging", desc: "Risultato indeterminato: necessari ulteriori accertamenti" }
-    ]
-  },
-
-  esc_echo_result_no_dimer: {
-    id: "esc_echo_result_no_dimer",
-    type: "question",
-    title: "Risultato Ecografia Multiorgano",
-    subtitle: "Alta probabilità clinica — alternativa a CTPA",
-    icon: "🩻",
-    options: [
-      { label: "Segni compatibili con PE (disfunzione RV + TVP/altri segni)", next: "esc_treatment_indicated", desc: "Quadro ecografico suggestivo per PE" },
-      { label: "Nessun segno compatibile con PE", next: "esc_inconclusive_imaging", desc: "L'ecografia da sola non esclude la PE con sufficiente sicurezza in un paziente ad alta probabilità clinica" }
-    ]
-  },
-
-  esc_no_pe_high_probability: {
-    id: "esc_no_pe_high_probability",
-    type: "result",
-    severity: "warning",
-    title: "CTPA Negativa con Alta Probabilità Clinica",
-    subtitle: "Discrepanza clinico-radiologica",
-    icon: "⚠️",
-    body: "La CTPA è risultata negativa, ma la probabilità clinica pre-test era alta (PE-likely).\n\nIn questi casi, sebbene infrequenti, sono stati riportati risultati falsi-negativi della CTPA. Il rischio tromboembolico a 3 mesi in questi pazienti è risultato comunque basso, ma può essere considerata ulteriore valutazione per immagini prima di escludere definitivamente il trattamento specifico per PE.",
-    note: "Decisione da valutare caso per caso; la necessità e il tipo di ulteriori test restano controversi.",
-    next: null
   },
 
   esc_pe_excluded: {
@@ -844,31 +735,6 @@ const PE_DECISION_TREE = {
     subtitle: "D-Dimero negativo",
     icon: "✅",
     body: "Il D-Dimero è risultato negativo (sotto la soglia utilizzata) in un paziente con probabilità clinica bassa/intermedia o PE-unlikely.\n\nLa PE è considerata esclusa: nessun trattamento anticoagulante necessario.",
-    next: null
-  },
-
-  esc_no_treatment: {
-    id: "esc_no_treatment",
-    type: "result",
-    severity: "safe",
-    title: "PE Esclusa — Nessun Trattamento",
-    subtitle: "CTPA normale",
-    icon: "✅",
-    body: "La CTPA è normale in un paziente con probabilità clinica bassa/intermedia (o PE-unlikely): la diagnosi di PE è rigettata senza necessità di ulteriori test.",
-    next: null
-  },
-
-  esc_treatment_indicated: {
-    id: "esc_treatment_indicated",
-    type: "result",
-    severity: "warning",
-    title: "PE Confermata — Trattamento Indicato",
-    subtitle: "CTPA positiva",
-    icon: "💊",
-    cor: "Classe I",
-    cor_color: "#22c55e",
-    body: "La CTPA mostra un difetto di riempimento a livello segmentale o più proximale: diagnosi di PE confermata.\n\nProcedere con il trattamento anticoagulante e, contestualmente, con la stratificazione del rischio (parametri clinici, dimensione/funzione del RV, biomarcatori di laboratorio) per definire la necessità di terapia di riperfusione o monitoraggio, oppure l'idoneità a dimissione precoce/trattamento ambulatoriale per i pazienti a basso rischio.",
-    note: "Iniziare l'anticoagulazione senza ritardo già durante il work-up diagnostico se la probabilità clinica è alta o intermedia.",
     next: null
   },
 
@@ -917,9 +783,9 @@ const ECHO_RV_TABLE = [
 // METADATA – aggiornare version e lastUpdated ad ogni modifica
 // ─────────────────────────────────────────────────────────────────────────────
 const TREE_METADATA = {
-  version:      "3.2.0",
+  version:      "3.3.0",
   source:       "AHA 2026 – Adults With Acute Pulmonary Embolism / ESC 2019 Guidelines for diagnosis and management of acute pulmonary embolism",
   author:       "AD – UMG",
-  lastUpdated:  "2026-06-24",
+  lastUpdated:  "2026-09-01",
   disclaimer:   "Questo strumento è a supporto decisionale clinico. Non sostituisce il giudizio del medico. Utilizzare sempre in combinazione con la valutazione clinica completa del paziente."
 };

@@ -6,6 +6,7 @@
   <title>PE Decision Tool – AHA 2026</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     /* ─── TOKENS ─────────────────────────────────────────── */
     :root {
@@ -276,6 +277,8 @@
       padding: 13px 15px; margin-bottom: 9px; background: var(--surface2);
     }
     .alt-card.best { border-color: var(--accent); background: rgba(88,166,255,.07); }
+    .alt-card.selected { border-color: var(--safe); background: rgba(63,185,80,.09); box-shadow: 0 0 0 1px var(--safe); }
+    .alt-card.selected.best { border-color: var(--safe); }
     .alt-header {
       display: flex; align-items: center; gap: 8px;
       font-size: .92rem; font-weight: 600; margin-bottom: 5px;
@@ -289,6 +292,7 @@
     .alt-card[onclick] { transition: border-color .15s, background .15s; }
     .alt-card[onclick]:hover { border-color: var(--accent); background: rgba(88,166,255,.07); }
     .alt-cta { margin-top: 10px; font-size: .8rem; font-weight: 600; color: var(--accent); }
+    .alt-cta-selected { color: var(--safe); }
     .alt-subitems { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
     .alt-subitem {
       font-size: .77rem; color: #9ec5fb;
@@ -308,6 +312,28 @@
     th { background: var(--surface2); color: var(--muted); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(255,255,255,.02); }
+
+    /* ─── PATIENT BADGE / REPORT BUTTON ──────────────────── */
+    .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    #patient-badge { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #report-btn.report-ready, #report-btn-schematic.report-ready { color: var(--safe); border-color: rgba(63,185,80,.4); }
+
+    /* ─── PATIENT GATE ───────────────────────────────────── */
+    .patient-id-input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-sans);
+      font-size: 1rem; padding: 12px 14px; outline: none; transition: border-color .15s;
+      margin-bottom: 16px;
+    }
+    .patient-id-input:focus { border-color: var(--accent); }
+
+    .ctpa-comment-input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-sans);
+      font-size: .92rem; padding: 10px 12px; outline: none; resize: vertical; min-height: 64px;
+      transition: border-color .15s;
+    }
+    .ctpa-comment-input:focus { border-color: var(--accent); }
 
     /* ─── FOOTER ─────────────────────────────────────────── */
     footer { text-align: center; padding: 16px; font-size: .7rem; color: var(--muted); border-top: 1px solid var(--border); }
@@ -329,7 +355,12 @@
       <div class="logo-sub">AHA Guidelines 2026 - ESC Guideline 2019</div>
     </div>
   </div>
-  <button class="btn-sm" onclick="resetApp()">↺ Riavvia</button>
+  <div class="header-actions">
+    <button class="btn-sm" id="patient-badge" onclick="editPatientId()" title="Imposta/modifica l'ID paziente (resta solo in questo browser)">🪪 Anonimo</button>
+    <button class="btn-sm" id="report-btn" onclick="downloadReport('visual')" title="Scarica il report PDF (versione visiva) del percorso svolto finora">📄 Report</button>
+    <button class="btn-sm" id="report-btn-schematic" onclick="downloadReport('schematic')" title="Scarica il report PDF (versione schematica) del percorso svolto finora">📋 Schema</button>
+    <button class="btn-sm" onclick="resetApp()">↺ Riavvia</button>
+  </div>
 </header>
 
 <div id="progress-wrap"><div id="progress-bar"></div></div>
@@ -353,6 +384,16 @@ let history  = [];
 let scores   = {};   // { nodeId: { items:{id:bool}, total:num, interpIdx:num } }
 let ddimers  = {};   // { nodeId: { value:num, age:num } }
 let ctpaState= {};   // { ci_id: bool }
+let ctpaComments = {}; // { nodeId: "commento libero del medico" }
+let ctpaChoice   = {}; // { nodeId: altId } — modalità di imaging scelta esplicitamente dall'utente
+
+// ── Identificativo paziente & log delle scelte (per il report) ──
+// L'ID paziente vive SOLO in questa variabile di sessione: non viene mai
+// salvato, inviato o persistito da nessuna parte. Serve unicamente ad
+// etichettare il report PDF scaricato dal medico. Lo strumento resta
+// anonimo lato software.
+let patientId   = "";
+let decisionLog = [];  // [{ fromIndex, fromNodeId, fromTitle, toNodeId, choice, detail, ts }]
 
 const TOTAL_STEPS = 7;
 
@@ -361,28 +402,658 @@ const TOTAL_STEPS = 7;
    ═══════════════════════════════════════════════════════════════ */
 function goTo(nodeId) {
   if (!PE_DECISION_TREE[nodeId]) { console.error("Node not found:", nodeId); return; }
+  // Registra nel log la scelta che ha portato dal nodo corrente a quello nuovo,
+  // derivandola automaticamente dal contenuto del nodo di partenza (nessun dato
+  // aggiuntivo richiesto): garantisce che il report rifletta esattamente il
+  // percorso e le selezioni fatte in app, senza aggiungere altro.
+  const fromId = history[history.length - 1];
+  if (fromId) {
+    const { choice, detail } = describeTransition(fromId, nodeId);
+    decisionLog.push({
+      fromIndex: history.length,
+      fromNodeId: fromId,
+      fromTitle: PE_DECISION_TREE[fromId].title || fromId,
+      toNodeId: nodeId,
+      choice, detail,
+      ts: new Date().toISOString()
+    });
+  }
   // Reset ctpa state each time we enter a ctpa_check-type node
-  if (PE_DECISION_TREE[nodeId].type === "ctpa_check") ctpaState = {};
+  if (PE_DECISION_TREE[nodeId].type === "ctpa_check") { ctpaState = {}; ctpaComments[nodeId] = ""; ctpaChoice[nodeId] = null; }
   history.push(nodeId);
   render(nodeId);
+  updateReportButtonState();
 }
 
 function goBack() {
   if (history.length <= 1) return;
   history.pop();
+  decisionLog = decisionLog.filter(e => e.fromIndex < history.length);
   render(history[history.length - 1]);
+  updateReportButtonState();
 }
 
 function resetApp() {
-  history = []; scores = {}; ddimers = {}; ctpaState = {};
-  goTo("start");
+  history = []; scores = {}; ddimers = {}; ctpaState = {}; ctpaComments = {}; ctpaChoice = {}; decisionLog = [];
+  // Ogni nuova valutazione riparte "pulita": l'ID paziente della valutazione
+  // precedente non deve essere riportato per errore su un altro paziente.
+  patientId = "";
+  updatePatientBadge();
+  renderPatientGate();
+  updateReportButtonState();
 }
 
 function jumpTo(idx) {
   history = history.slice(0, idx + 1);
+  decisionLog = decisionLog.filter(e => e.fromIndex < history.length);
   const lastId = history[history.length - 1];
-  if (PE_DECISION_TREE[lastId]?.type === "ctpa_check") ctpaState = {};
+  if (PE_DECISION_TREE[lastId]?.type === "ctpa_check") { ctpaState = {}; ctpaComments[lastId] = ""; ctpaChoice[lastId] = null; }
   render(lastId);
+  updateReportButtonState();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PATIENT ID – schermata iniziale + badge header
+   Nessun dato viene trasmesso o salvato: la variabile `patientId`
+   vive solo in memoria del browser per la durata della sessione ed
+   è usata esclusivamente per etichettare il report PDF.
+   ═══════════════════════════════════════════════════════════════ */
+function renderPatientGate() {
+  document.getElementById("breadcrumb").innerHTML = "";
+  document.getElementById("progress-bar").style.width = "0%";
+  const el = document.getElementById("content");
+  el.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <span class="card-icon">🪪</span>
+    <h1 class="card-title">Identificativo Paziente</h1>
+    <p class="card-subtitle">Facoltativo — usato solo per etichettare il report</p>
+    <div class="hint-box">L'ID inserito resta esclusivamente in questo browser, per la durata della sessione, al solo scopo di etichettare il report scaricabile a fine valutazione. Non viene salvato, trasmesso o collegato a nessun dato clinico: lo strumento resta anonimo lato software.</div>
+    <label class="ddimer-label" for="patient-id-input">Codice / ID paziente (es. numero cartella, iniziali)</label>
+    <input class="patient-id-input" id="patient-id-input" type="text" maxlength="64"
+      placeholder="es. RX-0234 — oppure lascia vuoto" value="${escapeHtml(patientId)}"
+      onkeydown="if(event.key==='Enter'){confirmPatientId();}" />
+    <button class="btn-primary" onclick="confirmPatientId()">Continua →</button>
+    <button class="btn-secondary" style="margin-top:10px" onclick="skipPatientId()">Salta — resta anonimo</button>
+  `;
+  el.appendChild(card);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function confirmPatientId() {
+  const inp = document.getElementById("patient-id-input");
+  patientId = inp ? inp.value.trim() : "";
+  updatePatientBadge();
+  history = []; // la schermata paziente non fa parte dell'albero decisionale
+  goTo("start");
+}
+
+function skipPatientId() {
+  patientId = "";
+  updatePatientBadge();
+  history = [];
+  goTo("start");
+}
+
+function editPatientId() {
+  const v = prompt("Inserisci/modifica l'ID paziente (facoltativo — resta solo in questo browser, non viene salvato né trasmesso):", patientId || "");
+  if (v === null) return; // annullato
+  patientId = v.trim();
+  updatePatientBadge();
+}
+
+function updatePatientBadge() {
+  const b = document.getElementById("patient-badge");
+  if (!b) return;
+  b.textContent = patientId ? ("🪪 " + patientId) : "🪪 Anonimo";
+}
+
+function updateReportButtonState() {
+  const ready = decisionLog.length > 0;
+  const btn1 = document.getElementById("report-btn");
+  const btn2 = document.getElementById("report-btn-schematic");
+  if (btn1) btn1.classList.toggle("report-ready", ready);
+  if (btn2) btn2.classList.toggle("report-ready", ready);
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DECISION LOG – ricostruzione automatica delle scelte
+   ═══════════════════════════════════════════════════════════════ */
+function ctpaSelectionSummary(node) {
+  const noneId = node.no_contraindications_option.id;
+  if (ctpaState[noneId]) return "Nessuna controindicazione presente.";
+  const abs = (node.contraindications.absolute || []).filter(ci => ctpaState[ci.id]).map(ci => "[Assoluta] " + ci.label);
+  const rel = (node.contraindications.relative || []).filter(ci => ctpaState[ci.id]).map(ci => "[Relativa] " + ci.label);
+  const all = [...abs, ...rel];
+  return all.length ? ("Controindicazioni selezionate: " + all.join("; ")) : "";
+}
+
+/* Determina la modalità di imaging scelta dall'utente sul nodo ctpa_check
+   corrente — condivisa tra interfaccia, log delle decisioni e generazione
+   del report. Richiede una selezione ESPLICITA (click dell'utente su una
+   delle card proposte): il solo aver spuntato le controindicazioni non
+   basta a considerare la scelta "fatta". */
+function getCtpaRecommendation(node) {
+  const noneId = node.no_contraindications_option.id;
+  const checkedIds = Object.keys(ctpaState).filter(k => ctpaState[k] && k !== noneId);
+  const noneChecked = !!ctpaState[noneId];
+  const hasAny = checkedIds.length > 0;
+  if (!noneChecked && !hasAny) return { made: false, pending: false };
+
+  const chosenId = ctpaChoice[node.id];
+  if (!chosenId) return { made: false, pending: true };
+
+  const recommended = node.alternatives.find(a => a.id === chosenId) || null;
+  return {
+    made: true,
+    recommended,
+    selectionSummary: ctpaSelectionSummary(node),
+    comment: (ctpaComments[node.id] || "").trim()
+  };
+}
+
+function describeTransition(fromId, toId) {
+  const node = PE_DECISION_TREE[fromId];
+  if (!node) return { choice: "Continua", detail: "" };
+
+  if (node.type === "question") {
+    const opt = (node.options || []).find(o => o.next === toId);
+    return { choice: opt ? ("Selezione: " + opt.label) : "Continua", detail: opt && opt.desc ? opt.desc : "" };
+  }
+
+  if (node.type === "ctpa_check") {
+    const alt = (node.alternatives || []).find(a => a.next === toId);
+    return {
+      choice: alt ? ("Modalità di imaging scelta: " + alt.label) : "Continua",
+      detail: ctpaSelectionSummary(node)
+    };
+  }
+
+  if (node.type === "score") {
+    const nid = fromId;
+    const state = scores[nid] || { items:{}, total:0, interpIdx:0 };
+    const result = getScoreResult(node, state, nid);
+    const lines = [];
+    if (node.interpretation && node.interpretation.length > 1) {
+      lines.push("Schema interpretativo utilizzato: " + node.interpretation[state.interpIdx].label);
+    }
+    if (node.scoreType === "years") {
+      const dd = ddimers[nid] || {};
+      if (node.items && node.items.length) {
+        const checked = node.items.filter(it => state.items[it.id]).map(it => it.label);
+        lines.push("Criteri soddisfatti: " + (checked.length ? checked.join("; ") : "nessuno"));
+      }
+      lines.push("Età paziente: " + (dd.age ? dd.age + " anni" : "n.d."));
+      lines.push("D-Dimero misurato: " + (dd.value !== undefined ? dd.value + " ng/mL" : "n.d."));
+    } else {
+      const checked = node.items.filter(it => state.items[it.id]).map(it => it.label);
+      lines.push("Criteri selezionati: " + (checked.length ? checked.join("; ") : "nessuno"));
+      lines.push("Punteggio totale: " + state.total);
+    }
+    // L'headline riprende direttamente la categoria/esito calcolato dalla regola
+    // (già scritta in linguaggio clinico chiaro) invece di ripetere il titolo
+    // dello step: rende ogni riga "Risultato:" immediatamente informativa.
+    return { choice: "Risultato: " + (result ? result.category : "punteggio calcolato"), detail: lines.join("\n") };
+  }
+
+  // info / result: transizione semplice, nessuna scelta multipla da registrare
+  return { choice: "Continua", detail: "" };
+}
+
+/* Stato/esito del nodo attualmente visualizzato, per la sezione "Esito" del report */
+function getCurrentOutcomeSummary() {
+  const curId = history[history.length - 1];
+  const node = PE_DECISION_TREE[curId];
+  if (!node) return null;
+
+  if (node.type === "result" && !node.next) {
+    return {
+      status: "finale", title: node.title, subtitle: node.subtitle || "",
+      body: node.body || "", note: node.note || "", severity: node.severity || "warning"
+    };
+  }
+
+  if (node.type === "ctpa_check") {
+    const rec = getCtpaRecommendation(node);
+    if (rec.made) {
+      return {
+        status: "finale", title: node.title,
+        subtitle: rec.selectionSummary,
+        body: rec.recommended
+          ? ("Modalità di imaging scelta: " + rec.recommended.label + " — " + rec.recommended.desc)
+          : "Nessuna modalità determinata dalle controindicazioni selezionate.",
+        note: "", comment: rec.comment, severity: "warning",
+        bannerOverride: "Modalità di imaging selezionata: " + (rec.recommended ? rec.recommended.label : "Non determinata")
+      };
+    }
+    return {
+      status: "in corso", title: node.title, subtitle: node.subtitle || "",
+      body: "Percorso non ancora concluso a questo step.", note: "", severity: "warning"
+    };
+  }
+
+  return {
+    status: "in corso", title: node.title, subtitle: node.subtitle || "",
+    body: "Percorso non ancora concluso a questo step.", note: "", severity: "warning"
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REPORT PDF
+   Genera un PDF con: identificativo paziente (se inserito), data/ora,
+   l'elenco cronologico di tutte le scelte fatte nel percorso, e
+   l'esito corrente — senza aggiungere interpretazioni cliniche
+   ulteriori rispetto a quanto già determinato dallo strumento.
+   ═══════════════════════════════════════════════════════════════ */
+function sanitizeForPdf(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/≥/g, ">=").replace(/≤/g, "<=")
+    .replace(/→/g, "->").replace(/±/g, "+/-")
+    .replace(/[–—]/g, "-").replace(/•/g, "-")
+    .replace(/[\u{1F300}-\u{1FAFF}]|[\u2600-\u27BF]|[\u2190-\u21FF]|[\u2B00-\u2BFF]/gu, "")
+    .replace(/\s+$/gm, "");
+}
+
+/* Raccoglie i dati del report — condivisi tra la variante visiva e quella
+   schematica, così che le due restino sempre coerenti tra loro. */
+function collectReportData() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("it-IT") + " " + now.toLocaleTimeString("it-IT");
+  const rawGuidelineChoice = (decisionLog.find(e => e.fromNodeId === "choose_guideline") || {}).choice || "";
+  const guidelineChoice = rawGuidelineChoice.replace(/^Selezione:\s*/, "") || "Non determinato";
+  const outcome = getCurrentOutcomeSummary();
+
+  // Se il percorso termina con una scelta di modalità di imaging già fatta
+  // dall'utente, aggiungila come step finale del percorso decisionale
+  // (copia locale: non modifica il log reale dell'app).
+  const stepsForReport = decisionLog.slice();
+  const curNode = PE_DECISION_TREE[history[history.length - 1]];
+  if (curNode && curNode.type === "ctpa_check") {
+    const rec = getCtpaRecommendation(curNode);
+    if (rec.made) {
+      // La modalità scelta è già l'headline dello step (campo "choice"): nei
+      // dettagli riportiamo solo le informazioni di supporto, senza ripeterla.
+      const lines = [rec.selectionSummary];
+      if (rec.comment) lines.push("Commento: " + rec.comment);
+      stepsForReport.push({
+        fromTitle: curNode.title,
+        choice: rec.recommended ? ("Modalità di imaging scelta: " + rec.recommended.label) : "Modalità di imaging selezionata",
+        detail: lines.filter(Boolean).join("\n")
+      });
+    }
+  }
+
+  const sevKey = s => (s === "safe" ? "safe" : s === "danger" ? "danger" : "warn");
+  let bannerKey = "warn", bannerLabel = "Valutazione in corso";
+  if (outcome) {
+    if (outcome.status === "finale") {
+      bannerKey = sevKey(outcome.severity);
+      bannerLabel = outcome.bannerOverride || ("ESITO: " + outcome.title + (outcome.subtitle ? " — " + outcome.subtitle : ""));
+    } else {
+      bannerKey = "warn";
+      bannerLabel = "VALUTAZIONE IN CORSO — step corrente: " + outcome.title;
+    }
+  }
+
+  return { now, dateStr, guidelineChoice, outcome, stepsForReport, bannerKey, bannerLabel, sevKey };
+}
+
+/* Punto di ingresso unico per il download del report, nelle due varianti
+   disponibili: "visual" (impaginazione curata, colori, card) oppure
+   "schematic" (solo testo, essenziale, senza fronzoli grafici). */
+function downloadReport(style) {
+  if (!decisionLog.length) {
+    alert("Nessuno step registrato: completa almeno un passaggio della valutazione prima di scaricare il report.");
+    return;
+  }
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert("Libreria di generazione PDF non disponibile (verifica la connessione a internet) e riprova.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const data = collectReportData();
+
+  if (style === "schematic") renderSchematicPdf(doc, data);
+  else renderVisualPdf(doc, data);
+
+  const idPart = patientId ? patientId.replace(/[^a-zA-Z0-9_-]/g, "_") : "anonimo";
+  const stamp  = data.now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const suffix = style === "schematic" ? "schema" : "visivo";
+  doc.save(`PE-Report_${idPart}_${suffix}_${stamp}.pdf`);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REPORT — VARIANTE VISIVA (banner colorato, card, box)
+   ═══════════════════════════════════════════════════════════════ */
+function renderVisualPdf(doc, data) {
+  const { dateStr, guidelineChoice, outcome, stepsForReport, bannerKey, bannerLabel, sevKey } = data;
+  const marginX = 46;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const maxW  = pageW - marginX * 2;
+  let y = 58;
+
+  // ── Palette coerente con i colori dell'interfaccia ──
+  const COL = {
+    dark:     [22, 27, 34],
+    text:     [45, 51, 59],
+    muted:    [122, 130, 140],
+    faint:    [244, 246, 248],
+    border:   [219, 223, 228],
+    accent:   [31, 111, 235],
+    safe:     [30, 132, 73],   safeBg:   [223, 244, 227],
+    warn:     [163, 111, 8],   warnBg:   [252, 237, 201],
+    danger:   [200, 40, 40],   dangerBg: [253, 224, 222]
+  };
+
+  function drawRunningHeader() {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...COL.muted);
+    doc.text("PE Decision Tool — Report di Valutazione" + (patientId ? "   ·   ID: " + sanitizeForPdf(patientId) : ""), marginX, 30);
+    doc.setDrawColor(...COL.border); doc.setLineWidth(0.6);
+    doc.line(marginX, 36, pageW - marginX, 36);
+    doc.setLineWidth(0.5);
+  }
+  function ensureSpace(h) {
+    if (y + h > pageH - 58) { doc.addPage(); y = 56; drawRunningHeader(); }
+  }
+  function wrapLines(text, width) { return doc.splitTextToSize(sanitizeForPdf(text), width); }
+
+  function sectionHeading(text) {
+    ensureSpace(28);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...COL.dark);
+    doc.text(sanitizeForPdf(text), marginX, y);
+    y += 6;
+    doc.setDrawColor(...COL.accent); doc.setLineWidth(1.4);
+    doc.line(marginX, y, marginX + 32, y);
+    doc.setLineWidth(0.5); doc.setDrawColor(...COL.border);
+    y += 16;
+  }
+
+  // Banner sintetico dell'esito (verde/arancio/rosso) subito sotto il titolo
+  function statusBanner(label, key) {
+    const lines = wrapLines(label, maxW - 24);
+    const h = lines.length * 13 + 16;
+    ensureSpace(h + 12);
+    doc.setFillColor(...COL[key + "Bg"]);
+    doc.roundedRect(marginX, y, maxW, h, 5, 5, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...COL[key]);
+    let ty = y + 19;
+    lines.forEach(l => { doc.text(l, marginX + 14, ty); ty += 13; });
+    doc.setTextColor(...COL.dark);
+    y += h + 16;
+  }
+
+  // Riquadro info paziente/sessione a due colonne
+  function infoBox(pairs) {
+    const lineH = 15;
+    const h = pairs.length * lineH + 16;
+    ensureSpace(h + 12);
+    doc.setDrawColor(...COL.border); doc.setFillColor(...COL.faint);
+    doc.roundedRect(marginX, y, maxW, h, 5, 5, "FD");
+    let ty = y + 19;
+    pairs.forEach(([label, value]) => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...COL.muted);
+      doc.text(sanitizeForPdf(label), marginX + 14, ty);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...COL.text);
+      doc.text(sanitizeForPdf(String(value)), marginX + 140, ty);
+      ty += lineH;
+    });
+    doc.setTextColor(...COL.dark);
+    y += h + 18;
+  }
+
+  // Card numerata per ogni step del percorso decisionale.
+  // Gli step puramente di passaggio (choice === "Continua") mostrano solo
+  // il titolo, senza riga "Scelta:" — non rappresentano una vera decisione.
+  function stepCard(idx, e) {
+    const titleLines  = wrapLines(e.fromTitle, maxW - 60);
+    const showChoice  = e.choice && e.choice !== "Continua";
+    const choiceLines = showChoice ? wrapLines(e.choice, maxW - 60) : [];
+    const detailLines = e.detail
+      ? e.detail.split("\n").filter(Boolean).flatMap(l => wrapLines("–  " + l, maxW - 72))
+      : [];
+    const h = 16 + titleLines.length * 13 + choiceLines.length * 12 + (detailLines.length ? 4 : 0) + detailLines.length * 11 + 10;
+    ensureSpace(h + 10);
+
+    doc.setDrawColor(...COL.border); doc.setFillColor(252, 252, 253);
+    doc.roundedRect(marginX, y, maxW, h, 4, 4, "FD");
+
+    doc.setFillColor(...COL.accent);
+    doc.circle(marginX + 17, y + 17, 9.5, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(255, 255, 255);
+    doc.text(String(idx), marginX + 17, y + 20, { align: "center" });
+
+    let ty = y + 14;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...COL.dark);
+    titleLines.forEach(l => { doc.text(l, marginX + 36, ty); ty += 13; });
+
+    if (choiceLines.length) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...COL.accent);
+      choiceLines.forEach(l => { doc.text(l, marginX + 36, ty); ty += 12; });
+    }
+
+    if (detailLines.length) {
+      ty += 3;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(...COL.muted);
+      detailLines.forEach(l => { doc.text(l, marginX + 44, ty); ty += 11; });
+    }
+    doc.setTextColor(...COL.dark);
+    y += h + 9;
+  }
+
+  // Box dettagliato dell'esito, con barra colorata a sinistra
+  function outcomeBox(outcome) {
+    const key = outcome.status === "finale" ? sevKey(outcome.severity) : "warn";
+    const titleLines = wrapLines(outcome.title, maxW - 30);
+    const subLines   = outcome.subtitle ? wrapLines(outcome.subtitle, maxW - 30) : [];
+    const bodyLines  = outcome.body ? wrapLines(outcome.body, maxW - 30) : [];
+    const commentLines = outcome.comment ? wrapLines("Commento del medico: " + outcome.comment, maxW - 30) : [];
+    const noteLines  = outcome.note ? wrapLines("Nota: " + outcome.note, maxW - 30) : [];
+    const warnLines  = outcome.status === "in corso"
+      ? wrapLines("Percorso non ancora concluso al momento della generazione del report.", maxW - 30) : [];
+
+    const h = 16
+      + titleLines.length * 13
+      + (subLines.length     ? subLines.length     * 11 + 4 : 0)
+      + (bodyLines.length    ? bodyLines.length    * 12 + 4 : 0)
+      + (commentLines.length ? commentLines.length * 11 + 4 : 0)
+      + (noteLines.length    ? noteLines.length    * 11 + 4 : 0)
+      + (warnLines.length    ? warnLines.length    * 11 + 4 : 0);
+    ensureSpace(h + 12);
+
+    doc.setFillColor(...COL[key + "Bg"]);
+    doc.rect(marginX, y, 5, h, "F");
+    doc.setDrawColor(...COL.border); doc.setFillColor(252, 252, 253);
+    doc.roundedRect(marginX + 5, y, maxW - 5, h, 3, 3, "FD");
+
+    let ty = y + 17;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...COL[key]);
+    titleLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 13; });
+    if (subLines.length) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...COL.muted);
+      subLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 11; }); ty += 3;
+    }
+    if (bodyLines.length) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.8); doc.setTextColor(...COL.text);
+      bodyLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 12; }); ty += 3;
+    }
+    if (commentLines.length) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(9.2); doc.setTextColor(...COL.text);
+      commentLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 11; }); ty += 3;
+    }
+    if (noteLines.length) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(...COL.muted);
+      noteLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 11; }); ty += 3;
+    }
+    if (warnLines.length) {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...COL.warn);
+      warnLines.forEach(l => { doc.text(l, marginX + 18, ty); ty += 11; });
+    }
+    doc.setTextColor(...COL.dark);
+    y += h + 16;
+  }
+
+  /* ── COSTRUZIONE DOCUMENTO ── */
+  // Titolo
+  doc.setFont("helvetica", "bold"); doc.setFontSize(19); doc.setTextColor(...COL.dark);
+  doc.text("PE Decision Tool", marginX, y); y += 20;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(...COL.muted);
+  doc.text("Report di Valutazione", marginX, y);
+  doc.setDrawColor(...COL.accent); doc.setLineWidth(1.6);
+  doc.line(marginX, y + 10, pageW - marginX, y + 10);
+  doc.setLineWidth(0.5); doc.setDrawColor(...COL.border);
+  y += 28;
+
+  statusBanner(bannerLabel, bannerKey);
+
+  infoBox([
+    ["ID Paziente",   patientId ? patientId : "Non specificato (anonimo)"],
+    ["Generato il",   dateStr],
+    ["Linee guida",   guidelineChoice],
+    ["Strumento",     "v" + TREE_METADATA.version + " · aggiornato " + TREE_METADATA.lastUpdated]
+  ]);
+
+  sectionHeading("Percorso decisionale  (" + stepsForReport.length + " step)");
+  stepsForReport.forEach((e, i) => stepCard(i + 1, e));
+  y += 2;
+
+  sectionHeading("Esito");
+  if (outcome) outcomeBox(outcome);
+  else {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...COL.muted);
+    doc.text("Nessun esito disponibile.", marginX, y); y += 16;
+  }
+
+  ensureSpace(48);
+  doc.setDrawColor(...COL.border); doc.line(marginX, y, pageW - marginX, y); y += 14;
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...COL.muted);
+  wrapLines(TREE_METADATA.disclaimer, maxW).forEach(l => { doc.text(l, marginX, y); y += 10; });
+  wrapLines("Fonte: " + TREE_METADATA.source, maxW).forEach(l => { doc.text(l, marginX, y); y += 10; });
+  doc.setTextColor(...COL.dark);
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...COL.muted);
+    doc.text("Pag. " + p + "/" + totalPages, pageW - marginX - 46, pageH - 22);
+    doc.text("PE Decision Tool" + (patientId ? "  ·  " + sanitizeForPdf(patientId) : ""), marginX, pageH - 22);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REPORT — VARIANTE SCHEMATICA
+   Solo testo in bianco e nero, layout a elenco, nessun colore/box/
+   card: pensata per la stampa rapida e la lettura "da dossier".
+   ═══════════════════════════════════════════════════════════════ */
+function renderSchematicPdf(doc, data) {
+  const { dateStr, guidelineChoice, outcome, stepsForReport } = data;
+  const marginX = 50;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const maxW  = pageW - marginX * 2;
+  let y = 54;
+
+  function drawRunningHeader() {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(0);
+    doc.text("PE DECISION TOOL - REPORT (SCHEMATICO)" + (patientId ? " - ID: " + sanitizeForPdf(patientId) : ""), marginX, 28);
+    doc.setDrawColor(0); doc.setLineWidth(0.4);
+    doc.line(marginX, 33, pageW - marginX, 33);
+  }
+  function ensureSpace(h) {
+    if (y + h > pageH - 50) { doc.addPage(); y = 50; drawRunningHeader(); }
+  }
+  function wrapLines(text, width) { return doc.splitTextToSize(sanitizeForPdf(text), width); }
+  function line(text, opts = {}) {
+    const size = opts.size || 10;
+    doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.setTextColor(0);
+    const lines = wrapLines(text, maxW - (opts.indent || 0));
+    lines.forEach(l => {
+      ensureSpace(size + 3);
+      doc.text(l, marginX + (opts.indent || 0), y);
+      y += size + 3;
+    });
+  }
+  function heading(text) {
+    ensureSpace(20);
+    y += 4;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(0);
+    doc.text(sanitizeForPdf(text).toUpperCase(), marginX, y);
+    y += 4;
+    doc.setDrawColor(0); doc.setLineWidth(0.6);
+    doc.line(marginX, y, pageW - marginX, y);
+    doc.setLineWidth(0.4);
+    y += 14;
+  }
+  function hr() {
+    ensureSpace(10);
+    doc.setDrawColor(150); doc.setLineWidth(0.3);
+    doc.line(marginX, y, pageW - marginX, y);
+    doc.setDrawColor(0);
+    y += 10;
+  }
+
+  // ── Intestazione ──
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(0);
+  doc.text("PE DECISION TOOL — REPORT DI VALUTAZIONE", marginX, y); y += 14;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(80);
+  doc.text("(versione schematica)", marginX, y); y += 16;
+  doc.setTextColor(0);
+
+  line("ID Paziente:  " + (patientId ? patientId : "Non specificato (anonimo)"), { bold: true });
+  line("Generato il:  " + dateStr);
+  line("Linee guida:  " + guidelineChoice);
+  line("Strumento:    v" + TREE_METADATA.version + " (aggiornato " + TREE_METADATA.lastUpdated + ")");
+  y += 4;
+  hr();
+
+  // ── Esito, in cima, in grassetto ──
+  heading("Esito");
+  if (outcome) {
+    line(outcome.title, { bold: true, size: 11 });
+    if (outcome.subtitle) line(outcome.subtitle, { size: 9.5, indent: 2 });
+    if (outcome.body) line(outcome.body, { size: 10, indent: 2 });
+    if (outcome.comment) line("Commento del medico: " + outcome.comment, { size: 9.5, indent: 2 });
+    if (outcome.note) line("Nota: " + outcome.note, { size: 9, indent: 2 });
+    if (outcome.status === "in corso") line("[ Percorso non ancora concluso al momento della generazione del report ]", { bold: true, size: 9 });
+  } else {
+    line("Nessun esito disponibile.");
+  }
+  y += 4;
+  hr();
+
+  // ── Percorso decisionale, elenco piano senza box/colori ──
+  heading("Percorso decisionale (" + stepsForReport.length + " step)");
+  stepsForReport.forEach((e, i) => {
+    line((i + 1) + ". " + e.fromTitle, { bold: true, size: 10.5 });
+    if (e.choice && e.choice !== "Continua") {
+      line(e.choice, { size: 9.5, indent: 12 });
+    }
+    if (e.detail) {
+      e.detail.split("\n").filter(Boolean).forEach(l => line("- " + l, { size: 9, indent: 18 }));
+    }
+    y += 5;
+  });
+
+  hr();
+  line(TREE_METADATA.disclaimer, { size: 8 });
+  line("Fonte: " + TREE_METADATA.source, { size: 8 });
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(0);
+    doc.text("Pag. " + p + "/" + totalPages, pageW - marginX - 42, pageH - 20);
+    doc.text("PE Decision Tool" + (patientId ? " - " + sanitizeForPdf(patientId) : ""), marginX, pageH - 20);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -402,17 +1073,12 @@ const NODE_LABELS = {
   // ESC 2019
   esc_hemodynamic_check:"Instabilità Emod.", esc_bedside_tte:"TTE Bedside",
   esc_rv_dysfunction:"Disfunzione RV", esc_search_other_causes_1:"Altre Cause",
-  esc_ctpa_feasible:"Scelta Imaging", esc_ctpa_result:"Esito CTPA",
-  esc_treat_high_risk_bedside:"Tratt. Alto Rischio", esc_treat_high_risk:"Tratt. Alto Rischio",
-  esc_search_other_causes_2:"Altre Cause", esc_geneva_score:"Geneva (ESC)",
+  esc_ctpa_feasible:"Scelta Imaging",
+  esc_choose_score:"Scegli Score (ESC)", esc_wells_score:"Wells (ESC)", esc_geneva_score:"Geneva (ESC)",
   esc_ddimer_test:"D-Dimero (ESC)",
-  esc_ctpa_low_intermediate:"Scelta Imaging", esc_ctpa_result_low_intermediate:"Esito CTPA",
-  esc_vq_result_low_intermediate:"Esito V/Q", esc_echo_result_low_intermediate:"Esito Ecografia",
-  esc_ctpa_no_dimer:"Scelta Imaging", esc_ctpa_result_no_dimer:"Esito CTPA",
-  esc_vq_result_no_dimer:"Esito V/Q", esc_echo_result_no_dimer:"Esito Ecografia",
-  esc_inconclusive_imaging:"Imaging Non Diagn.",
-  esc_no_pe_high_probability:"CTPA Neg./Alta Prob.",
-  esc_pe_excluded:"PE Esclusa", esc_no_treatment:"PE Esclusa", esc_treatment_indicated:"PE Confermata"
+  esc_ctpa_low_intermediate:"Scelta Imaging",
+  esc_ctpa_no_dimer:"Scelta Imaging",
+  esc_pe_excluded:"PE Esclusa"
 };
 
 function renderBreadcrumb() {
@@ -719,7 +1385,12 @@ function renderResult(node) {
       ? `<button class="btn-primary" style="margin-top:18px" onclick="goTo('${node.next}')">
            Verifica Controindicazioni CTPA →</button>`
       : ""}
-    <button class="btn-secondary" style="margin-top:${node.next?"10px":"18px"}" onclick="resetApp()">↺ Nuova Valutazione</button>
+    ${!node.next ? `
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:18px">
+      <button class="btn-primary" style="flex:1; min-width:180px" onclick="downloadReport('visual')">📄 Report Visivo</button>
+      <button class="btn-primary" style="flex:1; min-width:180px" onclick="downloadReport('schematic')">📋 Report Schematico</button>
+    </div>` : ""}
+    <button class="btn-secondary" style="margin-top:10px" onclick="resetApp()">↺ Nuova Valutazione</button>
     <button class="btn-secondary" style="margin-top:8px" onclick="goBack()">← Indietro</button>
   `;
   return card;
@@ -769,20 +1440,24 @@ function buildCtpaHtml(node) {
   // Status banner
   let statusHtml = "";
   if (noneChecked) {
-    statusHtml = `<div class="ctpa-ok">✅ Confermato: nessuna controindicazione — procedere con CTPA</div>`;
+    statusHtml = `<div class="ctpa-ok">✅ Confermato: nessuna controindicazione — puoi procedere con CTPA</div>`;
   } else if (hasAny) {
     statusHtml = `<div class="result-banner banner-warning" style="margin-top:12px">
-        🟡 CTPA controindicata o non disponibile – seleziona un'alternativa</div>`;
+        🟡 CTPA controindicata o non disponibile – seleziona un'alternativa tra quelle proposte</div>`;
   }
 
-  // Helper: render a clickable alternative card if it declares its own `next`,
-  // otherwise a static (non-navigable) card — preserves old AHA ctpa_check behavior.
-  const renderAltCard = (a, isBest) => {
+  const selectedAltId = ctpaChoice[node.id] || null;
+
+  // Card di un'alternativa di imaging: sempre cliccabile/selezionabile dall'utente.
+  // "isBest" è solo un suggerimento (badge "Consigliata" in base al punteggio di
+  // corrispondenza con le controindicazioni), ma è la SELEZIONE ESPLICITA
+  // dell'utente (click) a determinare la scelta che compare nel report.
+  const renderAltCard = (a, isBest, isSelected) => {
     const subHtml = a.subitems
       ? `<div class="alt-subitems">${a.subitems.map(s=>`<div class="alt-subitem">${s}</div>`).join("")}</div>`
       : "";
-    const echoHtml = a.id === "alt_echo" || a.id === "alt_echo_esc" ? `
-      <button class="echo-toggle" onclick="toggleEcho(this)">▸ Parametri ecocardiografici disfunzione RV</button>
+    const echoHtml = a.id.startsWith("alt_echo") ? `
+      <button class="echo-toggle" onclick="event.stopPropagation(); toggleEcho(this)">▸ Parametri ecocardiografici disfunzione RV</button>
       <div class="echo-table-wrap" style="display:none">
         <table><thead><tr><th>Parametro</th><th>Tecnica</th><th>Soglia</th></tr></thead>
         <tbody>${ECHO_RV_TABLE.map(r=>`<tr>
@@ -790,10 +1465,11 @@ function buildCtpaHtml(node) {
           <td>${r.technique}</td>
           <td>${r.definition}</td></tr>`).join("")}
         </tbody></table></div>` : "";
-    const clickable = !!a.next;
-    const clickAttr = clickable ? ` onclick="goTo('${a.next}')" style="cursor:pointer"` : "";
-    const cta = clickable ? `<div class="alt-cta">Continua →</div>` : "";
-    return `<div class="alt-card${isBest?" best":""}"${clickAttr}>
+    const cta = isSelected
+      ? `<div class="alt-cta alt-cta-selected">✓ Modalità selezionata</div>`
+      : `<div class="alt-cta">Seleziona questa modalità →</div>`;
+    return `<div class="alt-card${isBest?" best":""}${isSelected?" selected":""}"
+        onclick="selectCtpaAlt('${node.id}','${a.id}')" style="cursor:pointer">
       <div class="alt-header">
         <span>${a.icon}</span><span>${a.label}</span>
         ${isBest?`<span class="alt-best-badge">✦ Consigliata</span>`:""}
@@ -803,13 +1479,13 @@ function buildCtpaHtml(node) {
     </div>`;
   };
 
-  // Alternatives — shown for hasAny (ranked by relevance) OR for noneChecked (CTPA highlighted)
+  // Alternative proposte — per hasAny (ranked per pertinenza) o per noneChecked (CTPA)
   let altHtml = "";
   const ctpaAltId = node.alternatives.find(a => a.best_for.includes(noneOpt.id))?.id;
   if (noneChecked) {
     const ctpaAlt = node.alternatives.find(a => a.id === ctpaAltId);
     if (ctpaAlt) {
-      altHtml = `<div class="alt-section-label">Modalità raccomandata</div>${renderAltCard(ctpaAlt, true)}`;
+      altHtml = `<div class="alt-section-label">Modalità disponibile — seleziona per confermare</div>${renderAltCard(ctpaAlt, true, selectedAltId === ctpaAlt.id)}`;
     }
   } else if (hasAny) {
     const ranked = node.alternatives
@@ -820,16 +1496,20 @@ function buildCtpaHtml(node) {
 
     if (ranked.length) {
       const topScore = ranked[0].score;
-      const cards = ranked.map(a => renderAltCard(a, a.score === topScore)).join("");
-      altHtml = `<div class="alt-section-label">Alternative consigliate in base alle controindicazioni selezionate</div>${cards}`;
+      const cards = ranked.map(a => renderAltCard(a, a.score === topScore, selectedAltId === a.id)).join("");
+      altHtml = `<div class="alt-section-label">Seleziona la modalità di imaging tra le opzioni compatibili con le controindicazioni rilevate</div>${cards}`;
     }
   }
+
+  const selectionPendingHint = (noneChecked || hasAny) && !selectedAltId
+    ? `<div class="hint-box" style="margin-top:12px;border-color:var(--warn)">👆 Seleziona, tra le card sopra, la modalità di imaging che utilizzerai: comparirà poi nel report.</div>`
+    : "";
 
   return `
     <span class="card-icon">${node.icon}</span>
     <h1 class="card-title">${node.title}</h1>
     <p class="card-subtitle">${node.subtitle}</p>
-    <div class="hint-box">Seleziona le controindicazioni presenti, oppure confermi che non ce ne sono per procedere con CTPA.</div>
+    <div class="hint-box">Seleziona le controindicazioni presenti, oppure conferma che non ce ne sono, per individuare le modalità di imaging compatibili. La valutazione si conclude a questo step: interpretazione del referto e diagnosi finale restano di competenza clinica.</div>
     <div class="ci-section-label abs">⬤ Controindicazioni Assolute</div>
     ${absItems}
     <div class="ci-section-label rel">⬤ Controindicazioni Relative</div>
@@ -838,6 +1518,18 @@ function buildCtpaHtml(node) {
     ${noneItem}
     ${statusHtml}
     ${altHtml}
+    ${selectionPendingHint}
+    ${selectedAltId ? `
+    <div class="ctpa-comment-box" style="margin-top:16px">
+      <label class="ddimer-label" for="ctpa-comment-${node.id}">Commento clinico (facoltativo) — motiva la scelta della modalità di imaging</label>
+      <textarea id="ctpa-comment-${node.id}" class="ctpa-comment-input" rows="3"
+        placeholder="Es. paziente non trasferibile, priorità a ecografia point-of-care, disponibilità limitata di CTPA…"
+        oninput="updateCtpaComment('${node.id}', this.value)">${escapeHtml(ctpaComments[node.id] || "")}</textarea>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px">
+      <button class="btn-primary" style="flex:1; min-width:180px" onclick="downloadReport('visual')">📄 Report Visivo</button>
+      <button class="btn-primary" style="flex:1; min-width:180px" onclick="downloadReport('schematic')">📋 Report Schematico</button>
+    </div>` : ""}
     <div class="disclaimer" style="margin-top:16px">
       ${TREE_METADATA.disclaimer}<br>
       <strong>Fonte:</strong> ${TREE_METADATA.source} · ${TREE_METADATA.author}
@@ -853,6 +1545,9 @@ function toggleCi(nodeId, id) {
   const noneId = node.no_contraindications_option.id;
   ctpaState[noneId] = false;
   ctpaState[id] = !ctpaState[id];
+  // Il set di alternative candidate cambia: la selezione e il commento precedenti non sono più validi
+  ctpaChoice[nodeId] = null;
+  ctpaComments[nodeId] = "";
   const card = document.getElementById("ctpa-card");
   if (card) card.innerHTML = buildCtpaHtml(node);
 }
@@ -866,8 +1561,26 @@ function toggleNoneCi(nodeId) {
     Object.keys(ctpaState).forEach(k => { if (k !== noneId) ctpaState[k] = false; });
   }
   ctpaState[noneId] = turningOn;
+  ctpaChoice[nodeId] = null;
+  ctpaComments[nodeId] = "";
   const card = document.getElementById("ctpa-card");
   if (card) card.innerHTML = buildCtpaHtml(node);
+}
+
+// Selezione esplicita, da parte dell'utente, della modalità di imaging tra quelle
+// proposte in base alle controindicazioni rilevate. È questa scelta — non un
+// suggerimento automatico — a comparire poi nel report.
+function selectCtpaAlt(nodeId, altId) {
+  ctpaChoice[nodeId] = altId;
+  const node = PE_DECISION_TREE[nodeId];
+  const card = document.getElementById("ctpa-card");
+  if (card) card.innerHTML = buildCtpaHtml(node);
+}
+
+// Aggiorna il commento libero associato alla scelta della modalità di imaging.
+// Nessun re-render della card: evita di far perdere il focus/cursore mentre si scrive.
+function updateCtpaComment(nodeId, value) {
+  ctpaComments[nodeId] = value;
 }
 
 function toggleEcho(btn) {
@@ -893,7 +1606,9 @@ function sevIcon(sev) {
 /* ═══════════════════════════════════════════════════════════════
    BOOT
    ═══════════════════════════════════════════════════════════════ */
-goTo("start");
+updatePatientBadge();
+updateReportButtonState();
+renderPatientGate();
 </script>
 </body>
 </html>
