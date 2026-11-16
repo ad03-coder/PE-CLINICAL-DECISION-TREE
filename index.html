@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <!--
+    Content-Security-Policy: solo risorse di questa stessa origine, nessuno script o
+    stile inline, nessuna connessione di rete in uscita (connect-src 'none').
+    Se il server lo consente, inviare la stessa policy anche come header HTTP
+    (vedi SECURITY.md), aggiungendo frame-ancestors 'none' che via <meta> non è ammesso.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PE Decision Tool – AHA 2026 / ESC 2019</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon" aria-hidden="true">🫁</div>
+    <div>
+      <div class="logo-text">PE Decision Tool</div>
+      <div class="logo-sub">AHA Guidelines 2026 - ESC Guidelines 2019</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button type="button" class="btn-sm" id="patient-badge" data-action="editPatientId" title="Imposta/modifica ID paziente e operatore (restano solo in questo browser)">🪪 Anonimo</button>
+    <button type="button" class="btn-sm" id="report-btn" data-action="downloadReport" data-variant="visual" title="Scarica il report PDF (versione visiva) del percorso svolto finora">📄 Report</button>
+    <button type="button" class="btn-sm" id="report-btn-schematic" data-action="downloadReport" data-variant="schematic" title="Scarica il report PDF (versione schematica) del percorso svolto finora">📋 Schema</button>
+    <button type="button" class="btn-sm" data-action="requestReset">↺ Riavvia</button>
+  </div>
+</header>
+
+<div id="progress-wrap" role="progressbar" aria-label="Avanzamento della valutazione" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-bar"></div></div>
+
+<main>
+  <nav id="breadcrumb" aria-label="Percorso"></nav>
+  <div id="content"></div>
+  <noscript><p>Questo strumento richiede JavaScript per funzionare.</p></noscript>
+</main>
+
+<footer>
+  Strumento di supporto decisionale – Non sostituisce il giudizio clinico del medico.<br>
+  Fonte: AHA 2026 Adults With Acute Pulmonary Embolism © 2026 American Heart Association · ESC 2019 Guidelines on Acute Pulmonary Embolism
+  <div class="footer-row">
+    <span id="app-version"></span>
+    <button type="button" class="btn-sm" id="theme-btn" data-action="toggleTheme">☀ Tema chiaro</button>
+  </div>
+</footer>
+
+<dialog id="app-dialog" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+  <h2 class="dlg-title" id="dlg-title"></h2>
+  <p class="dlg-text" id="dlg-text"></p>
+  <div id="dlg-inputs"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn-secondary" id="dlg-cancel" data-action="dlgCancel" hidden></button>
+    <button type="button" class="btn-primary" id="dlg-ok" data-action="dlgOk">OK</button>
+  </div>
+</dialog>
+
+<script src="vendor/jspdf.umd.min.js" defer></script>
+<script src="js/decision_tree.js" defer></script>
+<script src="js/engine.js" defer></script>
+<script src="js/app.js" defer></script>
+</body>
+</html>
