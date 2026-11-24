@@ -210,7 +210,7 @@
       <h1 class="card-title" tabindex="-1">Nuova valutazione</h1>
       <p class="card-subtitle">Identificativi facoltativi — usati solo per etichettare il report</p>
       <div class="hint-box">Quanto inserito resta esclusivamente in questo browser, per la durata della sessione, al solo scopo di etichettare il report scaricabile a fine valutazione. Non viene salvato, trasmesso o collegato a nessun dato clinico: lo strumento resta anonimo lato software.</div>
-      <label class="ddimer-label" for="patient-id-input">Codice / ID paziente (es. numero cartella, iniziali)</label>
+      <label class="ddimer-label" for="patient-id-input">Codice / ID paziente</label>
       <input class="patient-id-input" id="patient-id-input" type="text" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"
         placeholder="es. RX-0234 — oppure lascia vuoto" value="${esc(patientId)}" data-enter="confirmPatientId" />
       <label class="ddimer-label" for="operator-input">Operatore che esegue la valutazione (nome o sigla)</label>
