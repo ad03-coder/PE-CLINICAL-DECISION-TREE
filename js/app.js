@@ -213,7 +213,7 @@
       <label class="ddimer-label" for="patient-id-input">Codice / ID paziente</label>
       <input class="patient-id-input" id="patient-id-input" type="text" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"
         placeholder="es. RX-0234 — oppure lascia vuoto" value="${esc(patientId)}" data-enter="confirmPatientId" />
-      <label class="ddimer-label" for="operator-input">Operatore che esegue la valutazione (nome o sigla)</label>
+      <label class="ddimer-label" for="operator-input">Codice / ID operatore</label>
       <input class="patient-id-input" id="operator-input" type="text" maxlength="64" autocomplete="off" spellcheck="false"
         placeholder="es. Dr. M. Rossi — oppure lascia vuoto" value="${esc(operatorName)}" data-enter="confirmPatientId" />
       <button type="button" class="btn-primary" data-action="confirmPatientId">Continua →</button>
